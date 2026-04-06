@@ -90,7 +90,9 @@
     }
     .history-item:hover { background: var(--btn-bg); color: var(--text); }
     .history-item.active { background: var(--btn-bg); color: var(--text); }
-    .history-item-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .history-item-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border-radius: 4px; padding: 1px 3px; }
+    .history-item-title[contenteditable="true"] { background: var(--input-bg); outline: none; overflow: visible; white-space: normal; color: var(--text); cursor: text; }
+    .history-item:hover .history-item-title:not([contenteditable="true"]) { cursor: pointer; }
     .delete-chat-btn {
       opacity: 0;
       background: none;
@@ -666,16 +668,77 @@
     const item = document.createElement('div');
     item.className = 'history-item' + (chat.id === activeChatId ? ' active' : '');
     item.dataset.chatId = chat.id;
-    item.innerHTML = `
-      <span class="history-item-title">${escapeHtml(chat.title)}</span>
-      <button class="delete-chat-btn" title="Delete" onclick="deleteChat(event,'${chat.id}')">✕</button>`;
-    item.addEventListener('click', () => loadChat(chat.id));
+
+    const titleSpan = document.createElement('span');
+    titleSpan.className = 'history-item-title';
+    titleSpan.textContent = chat.title;
+
+    // Double-click to rename inline
+    titleSpan.addEventListener('dblclick', (e) => {
+      e.stopPropagation();
+      titleSpan.contentEditable = 'true';
+      titleSpan.focus();
+      // Select all text
+      const range = document.createRange();
+      range.selectNodeContents(titleSpan);
+      window.getSelection().removeAllRanges();
+      window.getSelection().addRange(range);
+    });
+
+    const saveTitle = async () => {
+      titleSpan.contentEditable = 'false';
+      const newTitle = titleSpan.textContent.trim();
+      if (!newTitle) { titleSpan.textContent = chat.title; return; }
+      chat.title = newTitle;
+      await fetch(`/api/chats/${chat.id}/title`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: newTitle }),
+      });
+    };
+
+    titleSpan.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); titleSpan.blur(); }
+      if (e.key === 'Escape') { titleSpan.textContent = chat.title; titleSpan.blur(); }
+    });
+    titleSpan.addEventListener('blur', saveTitle);
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'delete-chat-btn';
+    deleteBtn.title = 'Delete';
+    deleteBtn.textContent = '✕';
+    deleteBtn.addEventListener('click', (e) => deleteChat(e, chat.id));
+
+    item.appendChild(titleSpan);
+    item.appendChild(deleteBtn);
+    item.addEventListener('click', () => {
+      if (titleSpan.contentEditable === 'true') return;
+      loadChat(chat.id);
+    });
     return item;
   }
 
   async function refreshHistory() {
     const res = await fetch('/api/chats');
     renderHistory(await res.json());
+  }
+
+  async function generateTitle(chatId, firstUserMessage) {
+    try {
+      const res = await fetch(`/api/chats/${chatId}/generate-title`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider: selectedProvider, model: selectedModel, firstUserMessage }),
+      });
+      const { title } = await res.json();
+      if (!title) return;
+      // Update the sidebar item without a full re-render
+      const item = document.querySelector(`.history-item[data-chat-id="${chatId}"]`);
+      if (item) {
+        const span = item.querySelector('.history-item-title');
+        if (span && !span.isContentEditable) span.textContent = title;
+      }
+    } catch {}
   }
 
   // ── New / load / delete ──
@@ -802,6 +865,11 @@
     currentController = null;
     document.getElementById('chat-area').scrollTop = 99999;
     updateContextIndicator();
+
+    // Generate AI title after the first exchange (1 user + 1 assistant)
+    if (messages.length === 2 && messages[0].role === 'user') {
+      generateTitle(activeChatId, messages[0].content);
+    }
   }
 
   // ── Render ──

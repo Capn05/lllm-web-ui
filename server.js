@@ -111,6 +111,54 @@ app.patch('/api/chats/:id/title', async (req, res) => {
   res.json({ ok: true });
 });
 
+app.post('/api/chats/:id/generate-title', async (req, res) => {
+  const { provider, model, firstUserMessage } = req.body;
+  if (!firstUserMessage) return res.status(400).json({ error: 'Missing firstUserMessage' });
+
+  const prompt = `Summarize the topic of this message as a short chat title (4-6 words max). Reply with just the title, no quotes, no period:\n\n"${firstUserMessage.slice(0, 300)}"`;
+
+  // Use a fast/cheap model from the same provider
+  const fastModels = {
+    anthropic: 'claude-haiku-4-5-20251001',
+    openai:    'gpt-4.1-nano',
+    xai:       'grok-3-mini',
+  };
+
+  let title = null;
+  try {
+    if (provider === 'anthropic' && anthropic) {
+      const msg = await anthropic.messages.create({
+        model: fastModels.anthropic,
+        max_tokens: 20,
+        messages: [{ role: 'user', content: prompt }],
+      });
+      title = msg.content[0]?.text?.trim();
+    } else if (provider === 'openai' && openai) {
+      const completion = await openai.chat.completions.create({
+        model: fastModels.openai,
+        max_tokens: 20,
+        messages: [{ role: 'user', content: prompt }],
+      });
+      title = completion.choices[0]?.message?.content?.trim();
+    } else if (provider === 'xai' && xai) {
+      const completion = await xai.chat.completions.create({
+        model: fastModels.xai,
+        max_tokens: 20,
+        messages: [{ role: 'user', content: prompt }],
+      });
+      title = completion.choices[0]?.message?.content?.trim();
+    }
+
+    if (title) {
+      await supabase.from('chats').update({ title, updated_at: Date.now() }).eq('id', req.params.id);
+    }
+    res.json({ title });
+  } catch (err) {
+    console.error('Title generation error:', err.message);
+    res.json({ title: null }); // fail silently — original title stays
+  }
+});
+
 app.post('/api/chats/:id/messages', async (req, res) => {
   const { role, content } = req.body;
   if (!role || !content) return res.status(400).json({ error: 'Missing fields' });
