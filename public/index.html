@@ -324,16 +324,14 @@
 
     /* ── MODEL DROPDOWN ── */
     #model-dropdown {
-      position: absolute;
-      bottom: calc(100% + 8px);
-      left: 0;
+      position: fixed;
       width: 260px;
       background: #1a1a1a;
       border: 1px solid var(--border);
       border-radius: 12px;
       padding: 4px;
       box-shadow: 0 8px 32px rgba(0,0,0,0.5);
-      z-index: 200;
+      z-index: 1000;
       max-height: 420px;
       overflow-y: auto;
       display: none;
@@ -623,10 +621,14 @@
     e.stopPropagation();
     const dropdown = document.getElementById('model-dropdown');
     const chip = document.getElementById('model-chip');
-    const isOpen = dropdown.classList.contains('open');
-    if (isOpen) {
+    if (dropdown.classList.contains('open')) {
       closeDropdown();
     } else {
+      // Position above the chip
+      const rect = chip.getBoundingClientRect();
+      dropdown.style.left = rect.left + 'px';
+      dropdown.style.top = (rect.top - 8) + 'px';
+      dropdown.style.transform = 'translateY(-100%)';
       dropdown.classList.add('open');
       chip.classList.add('open');
     }
